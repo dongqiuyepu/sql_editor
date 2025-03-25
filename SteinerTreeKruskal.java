@@ -1,5 +1,11 @@
+
 import java.util.*;
 import java.util.stream.Collectors;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class SteinerTreeKruskal {
     static class Node {
@@ -27,6 +33,10 @@ public class SteinerTreeKruskal {
             return neighbors.get(other);
         }
 
+        public void addNeighbor(Node node, Edge edge) {
+            neighbors.put(node, edge);
+        }
+
         @Override
         public boolean equals(Object o) {
             if (this == o) return true;
@@ -52,6 +62,12 @@ public class SteinerTreeKruskal {
             this.node2 = node2;
         }
 
+        public Edge(Node node1, Node node2, String name) {
+            this.name = name;
+            this.node1 = node1;
+            this.node2 = node2;
+        }
+
         public String getName() {
             return name;
         }
@@ -72,10 +88,12 @@ public class SteinerTreeKruskal {
     static class Graph {
         private List<Node> nodes;
         private Map<String, Node> nodeMap;
+        private Set<Edge> edges;
 
         public Graph() {
             this.nodes = new ArrayList<>();
             this.nodeMap = new HashMap<>();
+            this.edges = new HashSet<>();
         }
 
         public void addEdge(String from, String to, String edgeName) {
@@ -93,6 +111,7 @@ public class SteinerTreeKruskal {
             Edge edge = new Edge(edgeName, fromNode, toNode);
             fromNode.getNeighborEdges().put(toNode, edge);
             toNode.getNeighborEdges().put(fromNode, edge);
+            edges.add(edge);
         }
 
         private static class PathInfo {
@@ -430,16 +449,147 @@ public class SteinerTreeKruskal {
 
             return paths;
         }
+
+        public List<Graph> findIslands() {
+            List<Graph> islands = new ArrayList<>();
+            Set<Node> unvisited = new HashSet<>(nodes);
+            
+            while (!unvisited.isEmpty()) {
+                // Start a new island from any unvisited node
+                Node start = unvisited.iterator().next();
+                
+                // Create a new graph for this island
+                Graph island = new Graph();
+                
+                // Use BFS to find all connected nodes
+                Set<Node> islandNodes = new HashSet<>();
+                Set<Edge> islandEdges = new HashSet<>();
+                Queue<Node> queue = new LinkedList<>();
+                
+                queue.offer(start);
+                islandNodes.add(start);
+                
+                while (!queue.isEmpty()) {
+                    Node current = queue.poll();
+                    unvisited.remove(current);
+                    
+                    // Add node to island
+                    island.nodes.add(current);
+                    island.nodeMap.put(current.getContent(), current);
+                    
+                    // Check all neighbors
+                    for (Node neighbor : current.getNeighborEdges().keySet()) {
+                        Edge edge = current.getEdgeTo(neighbor);
+                        
+                        // Add edge to island
+                        if (!islandEdges.contains(edge)) {
+                            islandEdges.add(edge);
+                            island.edges.add(edge);
+                        }
+                        
+                        // Process unvisited neighbor
+                        if (!islandNodes.contains(neighbor)) {
+                            islandNodes.add(neighbor);
+                            queue.offer(neighbor);
+                        }
+                    }
+                }
+                
+                islands.add(island);
+            }
+            
+            return islands;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Graph:\n");
+            sb.append("- Nodes: ").append(nodes.size()).append("\n");
+            sb.append("- Edges: ").append(edges.size()).append("\n");
+            
+            sb.append("\nNodes:\n");
+            nodes.stream()
+                .map(Node::getContent)
+                .sorted()
+                .forEach(content -> sb.append("  * ").append(content).append("\n"));
+            
+            sb.append("\nEdges:\n");
+            edges.forEach(edge -> 
+                sb.append("  * ")
+                  .append(edge.node1.getContent())
+                  .append(" -[")
+                  .append(edge.getName())
+                  .append("]-> ")
+                  .append(edge.node2.getContent())
+                  .append("\n")
+            );
+            
+            return sb.toString();
+        }
     }
 
     public static void main(String[] args) {
-        // Run small test case for manual verification
-        runSmallTest();
+        // Create a graph with multiple islands
+        Graph graph = new Graph();
         
-        System.out.println("\n" + "=".repeat(80) + "\n");
+        // Island 1: Triangle
+        graph.addEdge("A1", "B1", "edge1");
+        graph.addEdge("B1", "C1", "edge2");
+        graph.addEdge("C1", "A1", "edge3");
         
-        // Run large test case for performance testing
-        runLargeTest();
+        // Island 2: Line
+        graph.addEdge("X1", "X2", "edge4");
+        graph.addEdge("X2", "X3", "edge5");
+        
+        // Island 3: Star shape
+        graph.addEdge("Center", "P1", "edge6");
+        graph.addEdge("Center", "P2", "edge7");
+        graph.addEdge("Center", "P3", "edge8");
+        graph.addEdge("Center", "P4", "edge9");
+        
+        // Island 4: Single node
+        graph.nodeMap.put("Isolated", new Node("Isolated"));
+        graph.nodes.add(graph.nodeMap.get("Isolated"));
+        
+        System.out.println("Original graph structure:");
+        System.out.println(graph);
+        
+        System.out.println("\nDetecting islands...");
+        List<Graph> islands = graph.findIslands();
+        System.out.println("Found " + islands.size() + " islands:\n");
+        
+        for (int i = 0; i < islands.size(); i++) {
+            System.out.println("Island " + (i + 1) + ":");
+            System.out.println(islands.get(i));
+            System.out.println("-".repeat(80));
+        }
+        
+        // Verify island properties
+        System.out.println("\nVerification:");
+        System.out.println("1. Triangle island (should have 3 nodes, 3 edges): " +
+            islands.stream()
+                .filter(g -> g.nodes.size() == 3 && g.edges.size() == 3)
+                .findFirst()
+                .isPresent());
+                
+        System.out.println("2. Line island (should have 3 nodes, 2 edges): " +
+            islands.stream()
+                .filter(g -> g.nodes.size() == 3 && g.edges.size() == 2)
+                .findFirst()
+                .isPresent());
+                
+        System.out.println("3. Star island (should have 5 nodes, 4 edges): " +
+            islands.stream()
+                .filter(g -> g.nodes.size() == 5 && g.edges.size() == 4)
+                .findFirst()
+                .isPresent());
+                
+        System.out.println("4. Isolated node (should have 1 node, 0 edges): " +
+            islands.stream()
+                .filter(g -> g.nodes.size() == 1 && g.edges.isEmpty())
+                .findFirst()
+                .isPresent());
     }
     
     private static void runSmallTest() {
