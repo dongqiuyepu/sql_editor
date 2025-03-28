@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="org.apache.calcite.example.avatica.SimpleCalciteAvaticaTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2025-03-28T06:39:41" hostname="pudongqiuyesMBP.bbrouter" time="1.171">
+  <properties/>
+  <testcase name="testSimpleQuery" classname="org.apache.calcite.example.avatica.SimpleCalciteAvaticaTest" time="1.171"/>
+  <system-out><![CDATA[Server started at jdbc:avatica:remote:url=http://localhost:49347;serialization=PROTOBUF
+]]></system-out>
+  <system-err><![CDATA[[Test worker] INFO org.eclipse.jetty.util.log - Logging initialized @356ms to org.eclipse.jetty.util.log.Slf4jLog
+[Test worker] INFO org.eclipse.jetty.server.Server - jetty-9.4.56.v20240826; built: 2024-08-26T17:15:05.868Z; git: ec6782ff5ead824dabdcf47fa98f90a4aedff401; jvm 23.0.1+11-39
+[Test worker] INFO org.eclipse.jetty.server.AbstractConnector - Started ServerConnector@b2c5e07{HTTP/1.1, (http/1.1)}{0.0.0.0:49347}
+[Test worker] INFO org.eclipse.jetty.server.Server - Started @484ms
+[Test worker] INFO org.apache.calcite.avatica.server.HttpServer - Service listening on port 49347.
+[Test worker] INFO org.apache.calcite.avatica.server.HttpServer - Service terminating.
+[Test worker] INFO org.eclipse.jetty.server.AbstractConnector - Stopped ServerConnector@b2c5e07{HTTP/1.1, (http/1.1)}{0.0.0.0:0}
+]]></system-err>
+</testsuite>
