@@ -26,6 +26,7 @@ import TableCell from '@mui/material/TableCell';
 import TableBody from '@mui/material/TableBody';
 import Paper from '@mui/material/Paper';
 import AddIcon from '@mui/icons-material/Add';
+import ScheduleConfigTab from './components/ScheduleConfigTab';
 
 // Define API base URL
 const API_BASE_URL = 'http://localhost:5002/api';
@@ -60,16 +61,17 @@ function App() {
   const [activeTabId, setActiveTabId] = useState(null);
   const [tables, setTables] = useState([]);
   const [savedQueries, setSavedQueries] = useState([]);
-  const [scheduledQueries, setScheduledQueries] = useState([]);
+  const [scheduledQueries, setScheduledQueries] = useState([]); // Initialize scheduledQueries as an array
   const [openQueryIds, setOpenQueryIds] = useState(new Set());
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [success, setSuccess] = useState(null);
 
   useEffect(() => {
     loadSavedQueries();
-    loadScheduledQueries();
+    fetchScheduledQueries();
     loadTables();
   }, []);
 
@@ -149,12 +151,20 @@ function App() {
     }
   };
 
-  const loadScheduledQueries = async () => {
+  const fetchScheduledQueries = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/scheduled-queries`);
-      setScheduledQueries(response.data);
+      console.log('Scheduled queries response:', response.data); // Debug log
+      if (response.data.success) {
+        // Ensure we're setting an array
+        const queries = Array.isArray(response.data.queries) ? response.data.queries : [];
+        setScheduledQueries(queries);
+      } else {
+        setScheduledQueries([]);
+      }
     } catch (error) {
-      console.error('Failed to load scheduled queries:', error);
+      console.error('Error fetching scheduled queries:', error);
+      setScheduledQueries([]);
     }
   };
 
@@ -331,9 +341,40 @@ function App() {
 
   const handleScheduleQuery = () => {
     const activeTab = getActiveTab();
-    if (!activeTab?.query) return;
+    if (!activeTab) return;
 
-    // TO DO: implement scheduling query logic
+    // Create a new schedule configuration tab
+    const newTab = {
+      id: uuidv4(),
+      name: 'Schedule Query',
+      type: 'schedule',
+      query: activeTab.query,
+    };
+
+    setTabs([...tabs, newTab]);
+    setActiveTabId(newTab.id);
+  };
+
+  const handleScheduleSubmit = async (config) => {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/schedule-query`, config);
+      
+      if (response.data.success) {
+        // Close the schedule tab
+        const newTabs = tabs.filter(tab => tab.id !== activeTabId);
+        setTabs(newTabs);
+        setActiveTabId(newTabs[0]?.id || null);
+        
+        // Refresh the scheduled queries list
+        await fetchScheduledQueries();
+        
+        // Show success message
+        alert('Query scheduled successfully!');
+      }
+    } catch (error) {
+      console.error('Error scheduling query:', error);
+      alert(error.response?.data?.error || 'Error scheduling query');
+    }
   };
 
   const handleQueryRename = async (query, newName) => {
@@ -429,7 +470,7 @@ function App() {
     }));
   };
 
-  const handleQueryChangeTab = (tabId, value) => {
+  const handleTabQueryChange = (tabId, value) => {
     if (!tabId) return;
     
     setTabs(prevTabs =>
@@ -443,6 +484,141 @@ function App() {
           : tab
       )
     );
+  };
+
+  const handleScheduleTab = (query) => {
+    // Create a new tab for scheduling
+    const newTab = {
+      id: uuidv4(),
+      type: 'schedule',
+      query,
+    };
+    
+    setTabs([...tabs, newTab]);
+    setActiveTabId(newTab.id);
+  };
+
+  const renderTabContent = (tab) => {
+    switch (tab.type) {
+      case 'schedule':
+        return (
+          <ScheduleConfigTab
+            query={tab.query}
+            onSchedule={handleScheduleSubmit}
+            onChange={(newQuery) => handleTabQueryChange(tab.id, newQuery)}
+          />
+        );
+      default:
+        return (
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Editor Panel */}
+            <Box sx={{ 
+              flex: 1,
+              minHeight: 0,
+              position: 'relative',
+              borderBottom: 1,
+              borderColor: 'divider',
+            }}>
+              <Editor
+                value={tab.query}
+                onChange={(value) => handleTabQueryChange(tab.id, value)}
+                height="100%"
+                defaultLanguage="sql"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  wordWrap: 'on',
+                }}
+              />
+              
+              {/* Action Buttons */}
+              <Box sx={{ 
+                position: 'absolute',
+                bottom: 8,
+                right: 24,
+                display: 'flex',
+                gap: 0.5,
+                alignItems: 'center',
+                zIndex: 1,
+              }}>
+                <Button
+                  variant="contained"
+                  onClick={executeQuery}
+                  size="small"
+                  sx={{ 
+                    minWidth: 0,
+                    px: 1,
+                    py: 0.5,
+                    fontSize: '0.7rem',
+                    textTransform: 'none',
+                    lineHeight: 1.2,
+                    bgcolor: 'black',
+                    '&:hover': {
+                      bgcolor: 'grey.900',
+                    },
+                  }}
+                >
+                  Run
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => setSaveDialogOpen(true)}
+                  size="small"
+                  sx={{ 
+                    minWidth: 0,
+                    px: 1,
+                    py: 0.5,
+                    fontSize: '0.7rem',
+                    textTransform: 'none',
+                    lineHeight: 1.2,
+                    bgcolor: 'grey.200',
+                    border: 'none',
+                    color: 'text.primary',
+                    '&:hover': {
+                      bgcolor: 'grey.300',
+                      border: 'none',
+                    },
+                  }}
+                >
+                  Save
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => handleScheduleTab(tab.query)}
+                  size="small"
+                  sx={{ 
+                    minWidth: 0,
+                    px: 1,
+                    py: 0.5,
+                    fontSize: '0.7rem',
+                    textTransform: 'none',
+                    lineHeight: 1.2,
+                    bgcolor: 'grey.200',
+                    border: 'none',
+                    color: 'text.primary',
+                    '&:hover': {
+                      bgcolor: 'grey.300',
+                      border: 'none',
+                    },
+                  }}
+                >
+                  Schedule
+                </Button>
+              </Box>
+            </Box>
+
+            {/* Results Panel */}
+            <Box sx={{ 
+              height: '40%',
+              minHeight: 0,
+              bgcolor: 'background.paper',
+              overflow: 'auto',
+            }}>
+              <ResultPanel results={results} error={error} />
+            </Box>
+          </Box>
+        );
+    }
   };
 
   useEffect(() => {
@@ -498,7 +674,7 @@ function App() {
           {/* Sidebar */}
           <Sidebar
             savedQueries={savedQueries}
-            scheduledQueries={scheduledQueries}
+            scheduledQueries={scheduledQueries} // Pass scheduledQueries to Sidebar
             onQuerySelect={handleSavedQuerySelect}
             onQueryRename={handleQueryRename}
             onQueryDelete={handleQueryDelete}
@@ -519,122 +695,9 @@ function App() {
               onNewQuery={handleNewQuery}
               onTabNameChange={handleTabNameChange}
             />
-            {activeTabId && tabs.length > 0 ? (
-              /* Split View Container */
-              <Box sx={{ 
-                display: 'flex',
-                flexDirection: 'column',
-                flex: 1,
-                minHeight: 0,
-                bgcolor: 'background.paper',
-                mt: '-1px', // Remove the gap and overlap the border
-              }}>
-                {/* Editor Panel */}
-                <Box sx={{ 
-                  flex: 1,
-                  minHeight: 0,
-                  height: '50%',
-                  position: 'relative',
-                }}>
-                  <Editor
-                    height="100%"
-                    defaultLanguage="sql"
-                    value={getActiveTab()?.query || ''}
-                    onChange={(value) => handleQueryChangeTab(activeTabId, value)}
-                    theme={theme.palette.mode === 'dark' ? 'vs-dark' : 'light'}
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                      wordWrap: 'on',
-                    }}
-                  />
-                  {/* Action Buttons */}
-                  <Box sx={{ 
-                    position: 'absolute',
-                    bottom: 8,
-                    right: 24,
-                    display: 'flex',
-                    gap: 0.5,
-                    alignItems: 'center',
-                  }}>
-                    <Button
-                      variant="contained"
-                      onClick={executeQuery}
-                      size="small"
-                      sx={{ 
-                        minWidth: 0,
-                        px: 1,
-                        py: 0.5,
-                        fontSize: '0.7rem',
-                        textTransform: 'none',
-                        lineHeight: 1.2,
-                        bgcolor: 'black',
-                        '&:hover': {
-                          bgcolor: 'grey.900',
-                        },
-                      }}
-                    >
-                      Run
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={() => setSaveDialogOpen(true)}
-                      size="small"
-                      sx={{ 
-                        minWidth: 0,
-                        px: 1,
-                        py: 0.5,
-                        fontSize: '0.7rem',
-                        textTransform: 'none',
-                        lineHeight: 1.2,
-                        bgcolor: 'grey.200',
-                        border: 'none',
-                        color: 'text.primary',
-                        '&:hover': {
-                          bgcolor: 'grey.300',
-                          border: 'none',
-                        },
-                      }}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={() => setSaveDialogOpen(true)}
-                      size="small"
-                      sx={{ 
-                        minWidth: 0,
-                        px: 1,
-                        py: 0.5,
-                        fontSize: '0.7rem',
-                        textTransform: 'none',
-                        lineHeight: 1.2,
-                        bgcolor: 'grey.200',
-                        border: 'none',
-                        color: 'text.primary',
-                        '&:hover': {
-                          bgcolor: 'grey.300',
-                          border: 'none',
-                        },
-                      }}
-                    >
-                      Schedule
-                    </Button>
-                  </Box>
-                </Box>
-
-                {/* Results Panel */}
-                <Box sx={{ 
-                  height: '50%',
-                  minHeight: 0,
-                  bgcolor: 'background.paper',
-                  overflow: 'auto',
-                  p: 2,
-                }}>
-                  <ResultPanel results={results} error={error} />
-                </Box>
-              </Box>
-            ) : null}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {getActiveTab() && renderTabContent(getActiveTab())}
+            </Box>
           </Box>
         </Box>
       </Box>
@@ -664,6 +727,24 @@ function App() {
           }}
         >
           <Typography variant="body2">{error}</Typography>
+        </Box>
+      )}
+      {success && (
+        <Box
+          sx={{
+            position: 'fixed',
+            bottom: 16,
+            right: 16,
+            bgcolor: 'success.main',
+            color: 'success.contrastText',
+            p: 2,
+            borderRadius: 1,
+            boxShadow: 2,
+            maxWidth: '80%',
+            zIndex: 1500,
+          }}
+        >
+          <Typography variant="body2">{success}</Typography>
         </Box>
       )}
     </ThemeProvider>

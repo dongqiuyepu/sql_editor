@@ -8,6 +8,7 @@
     "@monaco-editor/react": "^4.6.0",
     "@mui/icons-material": "^5.15.10",
     "@mui/material": "^5.15.10",
+    "@mui/x-date-pickers": "^6.19.4",
     "axios": "^1.6.7",
     "date-fns": "^2.29.3",
     "monaco-editor": "^0.44.0",

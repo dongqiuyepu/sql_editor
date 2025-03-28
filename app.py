@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 import traceback
 import os
+from datetime import timedelta
 
 app = Flask(__name__)
 CORS(app)
@@ -43,11 +44,23 @@ def init_db():
                       query TEXT NOT NULL,
                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         
-        # Create scheduled_queries table if not exists
+        # Drop existing scheduled_queries table to recreate with correct schema
+        c.execute('DROP TABLE IF EXISTS scheduled_queries')
+        
+        # Create scheduled_queries table with correct schema
         c.execute('''CREATE TABLE IF NOT EXISTS scheduled_queries
                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      name TEXT NOT NULL,
+                      description TEXT,
                       query TEXT NOT NULL,
-                      schedule_time TIMESTAMP NOT NULL,
+                      frequency TEXT NOT NULL,
+                      start_time TIMESTAMP NOT NULL,
+                      last_run_time TIMESTAMP,
+                      next_run_time TIMESTAMP,
+                      timeout_seconds INTEGER DEFAULT 300,
+                      retry_count INTEGER DEFAULT 0,
+                      notify_on_failure BOOLEAN DEFAULT 1,
+                      status TEXT DEFAULT 'pending',
                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         
         # Create customer table if not exists
@@ -211,52 +224,214 @@ def update_saved_query(query_id):
 
 @app.route('/api/scheduled-queries', methods=['GET'])
 def get_scheduled_queries():
-    db = get_db()
-    c = db.cursor()
-    c.execute('SELECT id, query, schedule_time, created_at FROM scheduled_queries ORDER BY schedule_time DESC')
-    queries = [{'id': row[0], 'query': row[1], 'schedule_time': row[2], 'created_at': row[3]} 
-               for row in c.fetchall()]
-    
-    return jsonify(queries)
-
-@app.route('/api/schedule', methods=['POST'])
-def schedule_query():
-    data = request.json
-    query = data.get('query')
-    schedule_time = data.get('schedule_time')
-    
-    if not query or not schedule_time:
-        return jsonify({
-            'success': False,
-            'error': 'Query and schedule time are required'
-        }), 400
-    
     try:
-        # Save to database
         db = get_db()
         c = db.cursor()
-        c.execute('INSERT INTO scheduled_queries (query, schedule_time) VALUES (?, ?)',
-                 (query, schedule_time))
-        db.commit()
+        c.execute('''
+            SELECT id, name, description, frequency, start_time, 
+                   last_run_time, next_run_time, status
+            FROM scheduled_queries
+            ORDER BY created_at DESC
+        ''')
         
-        # Add the job to the scheduler
-        job = scheduler.add_job(
-            func=execute_query,
-            trigger='date',
-            run_date=datetime.fromisoformat(schedule_time),
-            args=[query]
-        )
-        
+        queries = []
+        for row in c.fetchall():
+            queries.append({
+                'id': row[0],
+                'name': row[1],
+                'description': row[2],
+                'frequency': row[3],
+                'startTime': row[4],
+                'lastRunTime': row[5],
+                'nextRunTime': row[6],
+                'status': row[7]
+            })
+            
         return jsonify({
             'success': True,
-            'job_id': job.id,
-            'message': 'Query scheduled successfully'
+            'queries': queries
         })
+        
     except Exception as e:
+        print(f"Error getting scheduled queries: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
         }), 400
+
+@app.route('/api/schedule-query', methods=['POST'])
+def schedule_query():
+    try:
+        data = request.get_json()
+        required_fields = ['name', 'query', 'frequency', 'startTime']
+        
+        if not all(field in data for field in required_fields):
+            return jsonify({
+                'success': False,
+                'error': 'Missing required fields'
+            }), 400
+
+        # Convert frontend date format to Python datetime
+        start_time = datetime.fromisoformat(data['startTime'].replace('Z', '+00:00'))
+        
+        # Calculate next run time based on frequency
+        next_run_time = start_time
+        if data['frequency'] != 'once':
+            # For recurring schedules, calculate the next occurrence
+            if data['frequency'] == 'hourly':
+                next_run_time = start_time + timedelta(hours=1)
+            elif data['frequency'] == 'daily':
+                next_run_time = start_time + timedelta(days=1)
+            elif data['frequency'] == 'weekly':
+                next_run_time = start_time + timedelta(weeks=1)
+            elif data['frequency'] == 'monthly':
+                # Add one month (approximately)
+                next_run_time = start_time + timedelta(days=30)
+
+        db = get_db()
+        c = db.cursor()
+        
+        # Check if name already exists
+        c.execute('SELECT id FROM scheduled_queries WHERE name = ?', (data['name'],))
+        if c.fetchone() is not None:
+            return jsonify({
+                'success': False,
+                'error': 'A scheduled query with this name already exists'
+            }), 400
+
+        c.execute('''
+            INSERT INTO scheduled_queries 
+            (name, description, query, frequency, start_time, next_run_time, 
+             timeout_seconds, retry_count, notify_on_failure)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data['name'],
+            data.get('description', ''),
+            data['query'],
+            data['frequency'],
+            start_time,
+            next_run_time,
+            data.get('timeoutSeconds', 300),
+            data.get('retryCount', 0),
+            data.get('notifyOnFailure', True)
+        ))
+        
+        db.commit()
+
+        # Add job to scheduler
+        job_id = f"query_{c.lastrowid}"
+        if data['frequency'] == 'once':
+            scheduler.add_job(
+                execute_scheduled_query,
+                'date',
+                run_date=start_time,
+                args=[c.lastrowid],
+                id=job_id
+            )
+        else:
+            # Add recurring job
+            scheduler_config = {
+                'hourly': {'trigger': 'interval', 'hours': 1},
+                'daily': {'trigger': 'interval', 'days': 1},
+                'weekly': {'trigger': 'interval', 'weeks': 1},
+                'monthly': {'trigger': 'interval', 'days': 30}
+            }
+            
+            config = scheduler_config[data['frequency']]
+            scheduler.add_job(
+                execute_scheduled_query,
+                config['trigger'],
+                start_date=start_time,
+                **{k: v for k, v in config.items() if k != 'trigger'},
+                args=[c.lastrowid],
+                id=job_id
+            )
+
+        return jsonify({
+            'success': True,
+            'message': 'Query scheduled successfully'
+        })
+
+    except Exception as e:
+        print(f"Error scheduling query: {str(e)}")
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 400
+
+def execute_scheduled_query(query_id):
+    with app.app_context():
+        try:
+            db = get_db()
+            c = db.cursor()
+            
+            # Get query details
+            c.execute('SELECT * FROM scheduled_queries WHERE id = ?', (query_id,))
+            query_data = c.fetchone()
+            
+            if not query_data:
+                print(f"No query found with id {query_id}")
+                return
+            
+            # Update last run time
+            c.execute('''
+                UPDATE scheduled_queries 
+                SET last_run_time = CURRENT_TIMESTAMP,
+                    status = 'running'
+                WHERE id = ?
+            ''', (query_id,))
+            db.commit()
+            
+            # Execute query with timeout
+            timeout = query_data['timeout_seconds']
+            query = query_data['query']
+            
+            try:
+                c.execute(query)
+                results = c.fetchall()
+                
+                # Update status to success
+                c.execute('''
+                    UPDATE scheduled_queries 
+                    SET status = 'success'
+                    WHERE id = ?
+                ''', (query_id,))
+                
+            except Exception as e:
+                # Handle query execution error
+                error_msg = str(e)
+                print(f"Error executing scheduled query {query_id}: {error_msg}")
+                
+                c.execute('''
+                    UPDATE scheduled_queries 
+                    SET status = 'error'
+                    WHERE id = ?
+                ''', (query_id,))
+                
+                if query_data['notify_on_failure']:
+                    # TODO: Implement notification system
+                    print(f"Would send notification for query {query_id} failure")
+            
+            # Update next run time for recurring queries
+            if query_data['frequency'] != 'once':
+                c.execute('''
+                    UPDATE scheduled_queries 
+                    SET next_run_time = 
+                        CASE frequency
+                            WHEN 'hourly' THEN datetime(next_run_time, '+1 hour')
+                            WHEN 'daily' THEN datetime(next_run_time, '+1 day')
+                            WHEN 'weekly' THEN datetime(next_run_time, '+7 days')
+                            WHEN 'monthly' THEN datetime(next_run_time, '+30 days')
+                        END
+                    WHERE id = ?
+                ''', (query_id,))
+            
+            db.commit()
+            
+        except Exception as e:
+            print(f"Error in execute_scheduled_query: {str(e)}")
+            traceback.print_exc()
 
 @app.route('/api/rename-query', methods=['POST'])
 def rename_query():
